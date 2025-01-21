@@ -1063,7 +1063,13 @@ class HEDMInstrument(object):
         flags = self.calibration_flags
         for i, name in enumerate(self.calibration_flags_to_lmfit_names):
             if name in params_dict:
-                params_dict[name].vary = flags[i]
+                param = params_dict[name]
+                if param.expr is not None:
+                    # Don't update the flags on anything with an expression,
+                    # because it is computed and should not be varied.
+                    continue
+
+                param.vary = flags[i]
 
     @property
     def calibration_flags(self):
@@ -1082,6 +1088,11 @@ class HEDMInstrument(object):
             npp = 6
             if panel.distortion is not None:
                 npp += len(panel.distortion.params)
+
+            if panel.detector_type == 'cylindrical':
+                # Add one for the radius
+                npp += 1
+
             panel.calibration_flags = x[ii:ii + npp]
         self._calibration_flags = x
 
@@ -2187,10 +2198,6 @@ class HEDMInstrument(object):
         to be applied. actual computation is done inside
         the detector class
         """
-        if self.physics_package is None:
-            msg = f'Cannot calculate transmission without a physics package'
-            raise ValueError(msg)
-
         if rMat_s is None:
             rMat_s = ct.identity_3x3
 
@@ -2199,14 +2206,23 @@ class HEDMInstrument(object):
         for det_name, det in self.detectors.items():
             transmission_filter, transmission_phosphor = (
                 det.calc_filter_coating_transmission(energy))
-            transmission_physics_package = (
-                det.calc_physics_package_transmission(energy, rMat_s, self.physics_package))
-            effective_pinhole_area = det.calc_effective_pinhole_area(
-                self.physics_package)
-            transmissions[det_name] = (transmission_filter *
-                                       transmission_physics_package *
-                                       effective_pinhole_area *
-                                       transmission_phosphor)
+
+            transmission = transmission_filter * transmission_phosphor
+
+            if self.physics_package is not None:
+                transmission_physics_package = (
+                    det.calc_physics_package_transmission(
+                        energy, rMat_s, self.physics_package))
+                effective_pinhole_area = det.calc_effective_pinhole_area(
+                    self.physics_package)
+
+                transmission = (
+                    transmission *
+                    transmission_physics_package *
+                    effective_pinhole_area
+                )
+
+            transmissions[det_name] = transmission
         return transmissions
 
 # =============================================================================
